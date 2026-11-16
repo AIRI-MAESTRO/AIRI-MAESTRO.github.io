@@ -14,7 +14,10 @@ their own project repositories.
   documentation site at build time. Download clients can use the old URL
   directly.
 
-After a new skill archive is published, run **Actions → Publish MAESTRO
-redirects → Run workflow** to refresh the compatibility copy. The workflow
-reads the published docs sitemap and archive and only deploys after both
-are validated.
+The workflow checks both live skill URLs every 15 minutes. If a docs
+deployment publishes a different archive, the next scheduled run validates
+it and refreshes the old URL. Equal files produce no Pages deployment.
+GitHub may delay scheduled runs and disables schedules in public
+repositories after 60 days without repository activity.
+**Actions → Publish MAESTRO redirects → Run workflow** remains available
+for an immediate refresh.

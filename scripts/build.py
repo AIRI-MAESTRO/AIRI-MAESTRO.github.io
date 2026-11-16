@@ -1,19 +1,23 @@
 """Generate GitHub Pages compatibility files for the pre-rename URLs."""
 
 import argparse
+from hashlib import sha256
 from html import escape
+from io import BytesIO
 import json
 from pathlib import Path
 import re
-from urllib.parse import unquote, urlsplit
+from urllib.error import HTTPError
+from urllib.parse import unquote, urlencode, urlsplit
 from urllib.request import urlopen
 from xml.etree import ElementTree
 from zipfile import ZipFile
-from io import BytesIO
 
 HOST = "https://airi-maestro.github.io"
 DOCS = "/maestro-docs/"
 LANDING = "/maestro-page/"
+SKILL_FILE = "maestro.skill"
+LEGACY_SKILL = "care-docs/" + SKILL_FILE
 SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 
 
@@ -93,7 +97,24 @@ def write(output, relative_path, content):
     path.write_bytes(content.encode() if isinstance(content, str) else content)
 
 
-def build(output):
+def build(output, only_if_skill_changed=False, sync_id=""):
+    query = "?" + urlencode({"sync": sync_id}) if sync_id else ""
+    skill = fetch(HOST + DOCS + SKILL_FILE + query)
+    if only_if_skill_changed:
+        try:
+            previous_skill = fetch(f"{HOST}/{LEGACY_SKILL}{query}")
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            previous_skill = None
+        if previous_skill == skill:
+            print(f"Legacy skill is up to date (SHA-256 {sha256(skill).hexdigest()})")
+            return
+
+    with ZipFile(BytesIO(skill)) as archive:
+        if not any(name.endswith("/SKILL.md") for name in archive.namelist()) or archive.testzip():
+            raise ValueError("Invalid maestro.skill archive")
+
     sitemap = fetch(HOST + DOCS + "sitemap-index.xml")
     pages = ElementTree.fromstring(sitemap).findall(f"{SITEMAP_NS}sitemap/{SITEMAP_NS}loc")
     routes = set()
@@ -112,11 +133,7 @@ def build(output):
         legacy_file = Path("care-docs") / route / "index.html"
         write(output, legacy_file, redirect_html(target))
 
-    skill = fetch(HOST + DOCS + "maestro.skill")
-    with ZipFile(BytesIO(skill)) as archive:
-        if not any(name.endswith("/SKILL.md") for name in archive.namelist()) or archive.testzip():
-            raise ValueError("Invalid maestro.skill archive")
-    write(output, "care-docs/maestro.skill", skill)
+    write(output, LEGACY_SKILL, skill)
     write(output, "care-docs/sitemap-index.xml", sitemap)
     write(output, "care-page/index.html", redirect_html(LANDING))
     write(output, "index.html", redirect_html(LANDING))
@@ -127,4 +144,7 @@ def build(output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    build(parser.parse_args().output)
+    parser.add_argument("--only-if-skill-changed", action="store_true")
+    parser.add_argument("--sync-id", default="")
+    args = parser.parse_args()
+    build(args.output, args.only_if_skill_changed, args.sync_id)

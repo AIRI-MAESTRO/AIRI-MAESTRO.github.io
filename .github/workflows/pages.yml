@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
 
 permissions:
   contents: read
@@ -22,11 +24,26 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
+      - name: Check the published skill and generate legacy pages
+        id: build
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          args=(--sync-id "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          if [ "$EVENT_NAME" = schedule ]; then
+            args+=(--only-if-skill-changed)
+          fi
+          python3 scripts/build.py _site "${args[@]}"
+          if [ -f _site/care-docs/maestro.skill ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/configure-pages@v5
-      - name: Generate legacy pages
-        run: python3 scripts/build.py _site
+        if: steps.build.outputs.publish == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.build.outputs.publish == 'true'
         with:
           path: _site
       - uses: actions/deploy-pages@v4
+        if: steps.build.outputs.publish == 'true'
         id: deployment
